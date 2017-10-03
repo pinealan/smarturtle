@@ -40,7 +40,7 @@ def initialize(context):
         'keep track or trade', # whether we are keeping track of winning or losing or really trading
         'type of breakout',
         'scale-in stage',
-        'total contracts',
+        'total quantity',
         'initial price',
         'second price',
         'third price',
@@ -60,6 +60,7 @@ def initialize(context):
         'was last trade winning',
     ]
     context.master_table= pd.DataFrame(data = None, index = context.symbols, columns = context.required_information)
+    context.master_table'scale-in price'] = 0
 
     context.cfutures = {symbol: continuous_future(symbol , offset = 0, roll = 'calendar' , adjustment = 'mul') for symbol in context.symbols}
 
@@ -207,7 +208,7 @@ def get_contracts(context, data):
     for sym in context.tradable_symbols
     context.master_table.loc[sym]['current contract'] = contracts[sym]
 
-'''
+
 def check_rollover(context, data):
     """
     see if the contract has rollovered
@@ -215,13 +216,12 @@ def check_rollover(context, data):
     for sym in context.tradable_symbols:
         current_auto_close_date = context.master_table[sym]['current contract'].auto_close_date
                
-        try:
-            if current_auto_close_date != context.master_table[sym]['auto close date']
-                    
+        if current_auto_close_date != context.master_table[sym]['auto close date']:
+                if context.master_table.loc[sym]['scale-in stage'] != 0:
                     price = data.current(context.cfutures[sym], 'price')
                     order_identifier = order(
-                        context.contracts[sym],
-                        -previous_order.amount,
+                        context.master_table.loc[sym]['current contract'],
+                        context.master_table.loc[sym]['total quantity'],
                         style = LimitOrder(price)
                     )
 
@@ -229,15 +229,12 @@ def check_rollover(context, data):
                         context.orders[sym].append(order_identifier)
 
                     log.info(
-                        'Long(rollover) %s %i@%.2f'
+                        'rollover %s %i@%.2f'
                         %(
                             sym,
-                            -previous_order.amount,
+                            context.master_table.loc[sym]['total quantity'],
                             price
                         )
                     )
-        except (KeyError, IndexError):
-            pass
     
         context.master_table[sym]['auto close date'] = current_auto_close_date
-'''
