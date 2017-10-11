@@ -64,6 +64,10 @@ def initialize(context):
 
     context.cfutures = {symbol: continuous_future(symbol , offset = 0, roll = 'calendar' , adjustment = 'mul') for symbol in context.symbols}
 
+    #initializations
+    context.latest_trade_orders={}
+    context.latest_stop_orders={}
+
     # Breakout signals
     context.strat_one_breakout = 20
     context.strat_one_exit = 10
@@ -81,9 +85,11 @@ def initialize(context):
     context.stop_loss_in_N = 2
 
     # Order
+    context.open = 0
     context.filled = 1
     context.canceled = 2
     context.rejected = 3
+
     
     # Start of day functions
     schedule_function(
@@ -116,6 +122,22 @@ def initialize(context):
         time_rules.market_open(),
         False
     )
+
+#not scheduled functions
+
+def update_trade_orders(context,data,sym,order_identifier):
+    "to update the latest order"
+    try:
+         old_order = context.latest_trade_orders[sym]
+         if get_order(old_order).status == context.open:
+             cancel_order(old_order)
+    except KeyError:
+        pass
+    
+    order_identifier = context.latest_trade_orders[sym]
+
+
+
 
 def get_prices(context, data):
     """
@@ -226,7 +248,7 @@ def check_rollover(context, data):
                     )
 
                     if order_identifier is not None:
-                        context.orders[sym].append(order_identifier)
+                        update_trade_orders(context,data,sym,order_identifier)
 
                     log.info(
                         'rollover %s %i@%.2f'
