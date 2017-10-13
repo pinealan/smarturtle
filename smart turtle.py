@@ -48,7 +48,7 @@ def initialize(context):
         'stop loss price',
         'exit price',
         'ATR',
-        'N',
+        'unit size',
         'current price',
         'strat 1 long breakout price',
         'strat 1 short breakout price',
@@ -76,9 +76,9 @@ def initialize(context):
     context.strat_two_exit = 20
 
     # Risk
-    context.capital = context.portfolio.starting_cash
+    context.tradable_capital = context.portfolio.starting_cash
     context.capital_risk_per_trade = 0.01
-    context.capital_multiplier = 2
+    context.capital_lost_multiplier = 2
 
     context.market_risk_limit = 4
     context.direction_risk_limit = 12
@@ -123,6 +123,25 @@ def initialize(context):
         False
     )
 
+    #repeating functions
+
+    total_minutes = 6*60+30
+    for i in range(30, total_minutes, 30):
+        schedule_function(
+            compute_average_true_ranges,
+            date_rules.every_day(),
+            time_rules.market_open(minutes=i),
+            False
+        )
+
+        schedule_function(
+            compute_trade_sizes,
+            date_rules.every_day(),
+            time_rules.market_open(minutes=i),
+            False
+        )
+
+
 #not scheduled functions
 
 def update_trade_orders(context,data,sym,order_identifier):
@@ -134,10 +153,11 @@ def update_trade_orders(context,data,sym,order_identifier):
     except KeyError:
         pass
     
-    order_identifier = context.latest_trade_orders[sym]
+    context.latest_trade_orders[sym] = order_identifier 
 
 
 
+#Start of day functions
 
 def get_prices(context, data):
     """
@@ -260,3 +280,30 @@ def check_rollover(context, data):
                     )
     
         context.master_table[sym]['auto close date'] = current_auto_close_date
+
+# repeating functions
+
+def compute_average_true_ranges(context, data):
+    """
+    Compute ATR, aka N
+    """
+
+    rolling_window = context.strat_one_breakout+1
+    moving_average = context.strat_one_breakout
+
+    for sym in context.tradable_symbols:
+        context.master_table[sym]['ATR'] = ATR(
+            context.prices.loc[sym, 'high'][-rolling_window:],
+            context.prices.loc[sym, 'low'][-rolling_window:],
+            context.prices.loc[sym, 'close'][-rolling_window:],
+            timeperiod=moving_average
+        )[-1]
+
+
+def compute_trade_sizes(context, data):
+    for sym in context.tradable_symbols:
+        dollar_volatility = context.contracts[sym].multiplier\
+            * context.master_table[sym]['ATR']
+
+            context.master_table[sym]['unit size'] = int(context.tradable_capital/dollar_volatility)
+
