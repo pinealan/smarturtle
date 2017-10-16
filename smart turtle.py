@@ -40,22 +40,22 @@ def initialize(context):
         'keep track or trade', # whether we are keeping track of winning or losing or really trading
         'type of breakout',
         'scale-in stage',
-        'total quantity',
+        'quantity',
+        'average price',
         'initial price',
         'second price',
         'third price',
         'fourth price',
         'stop loss price',
-        'exit price',
-        'ATR',
-        'unit size',
-        'current price',
-        'strat 1 long breakout price',
-        'strat 1 short breakout price',
-        'strat 2 long breakout price',
-        'strat 2 short breakout price',
-        'current contract',
-        'auto close date',
+        'exit price', #ok
+        'ATR', #ok
+        'unit size', #ok
+        'strat 1 long breakout price', #ok
+        'strat 1 short breakout price', #ok
+        'strat 2 long breakout price', #ok
+        'strat 2 short breakout price', #ok
+        'current contract', #ok
+        'auto close date', #ok
         'profit of last trade',
         'was last trade winning',
     ]
@@ -68,7 +68,7 @@ def initialize(context):
     context.latest_trade_orders={}
     context.latest_stop_orders={}
 
-    # Breakout signals
+    # Breakout and exit signals
     context.strat_one_breakout = 20
     context.strat_one_exit = 10
     
@@ -111,6 +111,12 @@ def initialize(context):
         False
     )
     schedule_function(
+        compute_exit_price,
+        date_rules.every_day(),
+        time_rules.market_open(),
+        False
+    )
+    schedule_function(
         get_contracts,
         date_rules.every_day(),
         time_rules.market_open(),
@@ -136,6 +142,13 @@ def initialize(context):
 
         schedule_function(
             compute_trade_sizes,
+            date_rules.every_day(),
+            time_rules.market_open(minutes=i),
+            False
+        )
+
+        schedule_function(
+            update_risks,
             date_rules.every_day(),
             time_rules.market_open(minutes=i),
             False
@@ -228,6 +241,27 @@ def compute_breakout_price(context, data):
             [-context.strat_two_breakout-1:-1]\
             .min()
 
+def compute_exit_price(context,data):
+    """
+    Compute Exit Price
+    """
+    exit_prices[sym]['strat_one_long'] = context.prices.loc[sym, 'low']\
+        [-context.strat_one_exit-1:-1].min()
+
+    exit_prices[sym]['strat_one_short'] = context.prices.loc[sym, 'high']\
+        [-context.strat_one_exit-1:-1].max()
+
+    exit_prices[sym]['strat_two_long'] = context.prices.loc[sym, 'low']\
+        [-context.strat_two_exit-1:-1].min()
+
+    exit_prices[sym]['strat_two_short'] = context.prices.loc[sym, 'high']\
+        [-context.strat_two_exit-1:-1].max()
+    
+    for sym in context.tradable_symbols:
+        context.master_table['exit price'] = exit_prices[sym]\
+            [context.master_table[sym]['type of breakout']]
+
+
 def get_contracts(context, data):
     """
     Get futures contracts using the dict of continuous futures objects
@@ -301,9 +335,22 @@ def compute_average_true_ranges(context, data):
 
 
 def compute_trade_sizes(context, data):
+    """
+    how many unit equivilants to 1% of equity
+    """
     for sym in context.tradable_symbols:
         dollar_volatility = context.contracts[sym].multiplier\
             * context.master_table[sym]['ATR']
 
             context.master_table[sym]['unit size'] = int(context.tradable_capital/dollar_volatility)
+
+def update_risks(context,data):
+    """
+    Calculate long and short risk
+    """
+    long_risk_numbers = [x for x in context.master_table['scale-in stage'] if x > 0]
+    short_risk_numbers = [x for x in context.master_table['scale-in stage'] if x < 0]
+
+    context.long_risk = sum(long_risk_numbers)
+    context.short_risk = sum(short_risk_numbers)
 
