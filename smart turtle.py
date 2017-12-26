@@ -57,7 +57,7 @@ def initialize(context):
         'current contract', #ok
         'auto close date', #ok
         'profit of last trade',
-        'was last trade winning', #bool
+        'was last strat 1 trade winning', #bool
     ]
 
     #creating a Master Table
@@ -384,8 +384,10 @@ def update_risks(context,data):
     """
     Calculate long and short risk and calculate quota for long and short
     """
-    long_risk_numbers = [x for x in context.MT['scale-in stage'] if x > 0]
-    short_risk_numbers = [x for x in context.MT['scale-in stage'] if x < 0]
+
+    tradingMT = context.MT[context.MT['keep track or trade'] == 'trade']
+    long_risk_numbers = [x for x in tradingMT['scale-in stage'] if x > 0]
+    short_risk_numbers = [x for x in tradingMT['scale-in stage'] if x < 0]
 
     context.long_risk = sum(long_risk_numbers)
     context.short_risk = sum(short_risk_numbers)
@@ -396,6 +398,7 @@ def update_risks(context,data):
 def detect_entry_signals(context,data):
     """
     Place limit orders when reach breakout
+    hirachy of entry signals: strat 1 > strat 2 > keep track
     """
     for sym in context.tradable_symbols:
 
@@ -405,42 +408,67 @@ def detect_entry_signals(context,data):
         long_or_short = 0
         current_price = data.current(context.cfutures[sym], 'price')
 
-        if current_price >= context.MT[sym]['strat 1 long breakout price']:
-            context.MT[sym]['scale in stage'] = 1
-            context.MT[sym]['type of breakout'] = 'strat_one_long'
+        #check strat 1 breakout
+        if context.MT[sym]['was last strat 1 trade winning'] != True:
 
-            if context.MT[sym]['was last trade winning'] == True:
-                context.MT[sym]['keep track or trade'] = 'keep_track'
-            else:
+            if (context.long_quota > 0 and
+                current_price >= context.MT[sym]['strat 1 long breakout price']):
+
+                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['type of breakout'] = 'strat_one_long'
                 context.MT[sym]['keep track or trade'] = 'trade'
+                context.long_quota -= 1
+                long_or_short = 1
 
+            else if (context.short_quota > 0 and
+                     current_price <= context.MT[sym]['strat 1 short breakout price']):
 
-        else if current_price <= context.MT[sym]['strat 1 short breakout price']:
-            context.MT[sym]['scale in stage'] = -1
-            context.MT[sym]['type of breakout'] = 'strat_one_short'
-
-            if context.MT[sym]['was last trade winning'] == True:
-                context.MT[sym]['keep track or trade'] = 'keep_track'
-            else:
+                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['type of breakout'] = 'strat_one_short'
                 context.MT[sym]['keep track or trade'] = 'trade'
+                context.short_quota -= 1
+                long_or_short = -1
         
-        else if current_price >= context.MT[sym]['strat 2 long breakout price']:
-            context.MT[sym]['scale in stage'] = 1
-            context.MT[sym]['type of breakout'] = 'strat_two_long'
-            context.MT[sym]['keep track or trade']= 'trade'
+        #check strat 2 breakout
+        else:
+            if (context.long_quota > 0 and
+                current_price >= context.MT[sym]['strat 2 long breakout price']):
 
-        else if current_price <= context.MT[sym]['strat 2 short breakout price']:
-            context.MT[sym]['scale in stage'] = -1
-            context.MT[sym]['type of breakout'] = 'strat_two_short'
-            context.MT[sym]['keep track or trade']= 'trade'
+                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['type of breakout'] = 'strat_two_long'
+                context.MT[sym]['keep track or trade']= 'trade'
+                context.long_quota -= 1
+                long_or_short = 1
 
-        if long_or_Short != 0:
+            else if (context.short_quota > 0 and
+                     current_price <= context.MT[sym]['strat 2 short breakout price']:
+                       
+                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['type of breakout'] = 'strat_two_short'
+                context.MT[sym]['keep track or trade']= 'trade'
+                context.short_quota -= 1
+                long_or_short = -1
+
+        #check keep track
+        else:
+
+            if current_price >= context.MT[sym]['strat 1 long breakout price']:
+                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['type of breakout'] = 'strat_one_long'
+                context.MT[sym]['keep track or trade'] = 'keep_track'
+
+            else if current_price <= context.MT[sym]['strat 1 short breakout price']:
+                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['type of breakout'] = 'strat_one_short'
+                context.MT[sym]['keep track or trade'] = 'keep_track'         
+ 
+
+        if long_or_short != 0:
             context.MT[sym]['initial entry time'] = get_datetime()
 
-        if context.MT[sym]['keep track or trade'] == 'trade':
             order_identifier = order(
                 context.MT[sym]['current contract'],
-                context.MT[sym]['scale in stage'] * context.MT[sym]['unit size'],
+                long_or_short * context.MT[sym]['unit size'],
                 style = LimitOrder(current_price)
             )
             update_trade_orders(context,data,sym,order_identifier)
