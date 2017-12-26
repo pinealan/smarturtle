@@ -37,15 +37,15 @@ def initialize(context):
 
     context.required_information = [
         'cfutures', #ok
-        'keep track or trade', # whether we are keeping track of winning or losing or really trading
-        'type of breakout',
+        'keep track or trade', # trading or keeping track the performance #format: keep_track/trade
+        'type of breakout', # format: strat_one/two_long/short
         'scale-in stage',
-        'quantity', #do next
-        'avg price', #do next
-        'initial price',
-        'second price',
-        'third price',
-        'fourth price',
+        'quantity', #ok
+        'avg price', #ok/
+        'initial entry time',
+        'second entry time',
+        'third entry time',
+        'fourth entry time',
         'stop loss price',
         'exit price', #ok
         'ATR', #ok
@@ -57,12 +57,12 @@ def initialize(context):
         'current contract', #ok
         'auto close date', #ok
         'profit of last trade',
-        'was last trade winning',
+        'was last trade winning', #bool
     ]
 
     #creating a Master Table
     context.MT= pd.DataFrame(data = None, index = context.symbols, columns = context.required_information)
-    context.MT'scale-in price'] = 0
+    context.MT'scale-in stage'] = 0
 
     context.cfutures = {symbol: continuous_future(symbol , offset = 0, roll = 'calendar' , adjustment = 'mul') for symbol in context.symbols}
 
@@ -161,8 +161,20 @@ def initialize(context):
             date_rules.every_day(),
             time_rules.market_open(minutes=i),
             False
+
+        schedule_function(
+            detect_entry_signals,
+            date_rules.every_day(),
+            time_rules.market_open(minutes=i),
+            False
         )
 
+        schedule_function(
+            detect_scaling_signals,
+            date_rules.every_day(),
+            time_rules.market_open(minutes=i),
+            False
+        )        
 
 #not scheduled functions
 
@@ -366,11 +378,11 @@ def compute_trade_sizes(context, data):
         dollar_volatility = context.contracts[sym].multiplier\
             * context.MT[sym]['ATR']
 
-            context.MT[sym]['unit size'] = int(context.tradable_capital/dollar_volatility)
+        context.MT[sym]['unit size'] = int(context.tradable_capital/dollar_volatility)
 
 def update_risks(context,data):
     """
-    Calculate long and short risk
+    Calculate long and short risk and calculate quota for long and short
     """
     long_risk_numbers = [x for x in context.MT['scale-in stage'] if x > 0]
     short_risk_numbers = [x for x in context.MT['scale-in stage'] if x < 0]
@@ -378,3 +390,78 @@ def update_risks(context,data):
     context.long_risk = sum(long_risk_numbers)
     context.short_risk = sum(short_risk_numbers)
 
+    context.long_quota = context.direction_risk_limit - context.long_risk
+    context.short_quota = context.direction_risk_limit - context. short_risk
+
+def detect_entry_signals(context,data):
+    """
+    Place limit orders when reach breakout
+    """
+    for sym in context.tradable_symbols:
+
+        if context.MT[sym]['scale in stage'] != 0:
+            continue
+    
+        long_or_short = 0
+        current_price = data.current(context.cfutures[sym], 'price')
+
+        if current_price >= context.MT[sym]['strat 1 long breakout price']:
+            context.MT[sym]['scale in stage'] = 1
+            context.MT[sym]['type of breakout'] = 'strat_one_long'
+
+            if context.MT[sym]['was last trade winning'] == True:
+                context.MT[sym]['keep track or trade'] = 'keep_track'
+            else:
+                context.MT[sym]['keep track or trade'] = 'trade'
+
+
+        else if current_price <= context.MT[sym]['strat 1 short breakout price']:
+            context.MT[sym]['scale in stage'] = -1
+            context.MT[sym]['type of breakout'] = 'strat_one_short'
+
+            if context.MT[sym]['was last trade winning'] == True:
+                context.MT[sym]['keep track or trade'] = 'keep_track'
+            else:
+                context.MT[sym]['keep track or trade'] = 'trade'
+        
+        else if current_price >= context.MT[sym]['strat 2 long breakout price']:
+            context.MT[sym]['scale in stage'] = 1
+            context.MT[sym]['type of breakout'] = 'strat_two_long'
+            context.MT[sym]['keep track or trade']= 'trade'
+
+        else if current_price <= context.MT[sym]['strat 2 short breakout price']:
+            context.MT[sym]['scale in stage'] = -1
+            context.MT[sym]['type of breakout'] = 'strat_two_short'
+            context.MT[sym]['keep track or trade']= 'trade'
+
+        if long_or_Short != 0:
+            context.MT[sym]['initial entry time'] = get_datetime()
+
+        if context.MT[sym]['keep track or trade'] == 'trade':
+            order_identifier = order(
+                context.MT[sym]['current contract'],
+                context.MT[sym]['scale in stage'] * context.MT[sym]['unit size'],
+                style = LimitOrder(current_price)
+            )
+            update_trade_orders(context,data,sym,order_identifier)
+
+            log.info(
+                '%s(breakout) %s %i@%.2f'
+                %(
+                    context.MT[sym]['type of breakout'],
+                    sym,
+                    context.MT[sym]['unit size'],
+                    current_price  
+                )
+            )
+
+def detect_scaling_signals(context,data)
+    """
+    Place limit orders when reach scaling signals
+    """
+    for sym in context.tradable_symbols:
+        
+        if context.MT[sym]['scale in stage'] == 0 or ABS(context.MT[sym]['scale in stage']) == 4:
+            continue
+        
+        
