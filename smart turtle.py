@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
+from datetime import date
 from time import time
 from talib import ATR
 
@@ -39,9 +40,9 @@ def initialize(context):
         'cfutures', #ok
         'keep track or trade', # trading or keeping track the performance #format: keep_track/trade
         'type of breakout', # format: strat_one/two_long/short
-        'scale-in stage',
-        'quantity', #ok
-        'avg price', #ok/
+        'scale-in stage', #0-4
+        'quantity', #ok only have value when TRADING
+        'avg price', #ok only have value when TRADING
         'initial entry time',
         'second entry time',
         'third entry time',
@@ -189,7 +190,40 @@ def update_trade_orders(context,data,sym,order_identifier):
     
     context.latest_trade_orders[sym] = order_identifier 
 
+def retrieve_entry_time(sym,x)
+    "to obtain the entry time of the futures"
+    if x = 1:
+        return context.MT[sym]["initial entry time"]
+    if x = 2: 
+        return context.MT[sym]["second entry time"]
+    if x = 3:
+        return context.MT[sym]["third entry time"]
 
+def retrieve_entry_price(context,data,sym,retrieved_time)
+    " obtain the price of that future at that specific time"
+
+    data = history(  
+        context.MT[sym]['cfutures'],  
+        fields = ['price','contract'],  
+        frequency = 'minute',  
+        start = retrieved_time.date(),  
+        end = retrieved_time.date()  
+    )
+
+    price = data[retrieved_time.strftime("%Y-%m-%d %H:%M:%S")]
+    return price
+
+def store_entry_time(sym, x, input_time)
+    "To store the time into the correct entry time box"
+
+    if x = 1:
+        context.MT[sym]["initial entry time"] = input_time
+    if x = 2:
+        context.sym[sym]["second entry time"] = input_time
+    if x = 3:
+        context.MT[sym]["third entry time"] = input_time
+    if x = 4:
+        context.MT[sym]["fourth entry time"] = input_time
 
 #Start of day functions
 
@@ -322,8 +356,7 @@ def check_rollover(context, data):
                         style = LimitOrder(price)
                     )
 
-                    if order_identifier is not None:
-                        update_trade_orders(context,data,sym,order_identifier)
+                    update_trade_orders(context,data,sym,order_identifier)
 
                     log.info(
                         'rollover %s %i@%.2f'
@@ -402,7 +435,7 @@ def detect_entry_signals(context,data):
     """
     for sym in context.tradable_symbols:
 
-        if context.MT[sym]['scale in stage'] != 0:
+        if context.MT[sym]['scale-in stage'] != 0:
             continue
     
         long_or_short = 0
@@ -414,7 +447,7 @@ def detect_entry_signals(context,data):
             if (context.long_quota > 0 and
                 current_price >= context.MT[sym]['strat 1 long breakout price']):
 
-                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['scale-in stage'] = 1
                 context.MT[sym]['type of breakout'] = 'strat_one_long'
                 context.MT[sym]['keep track or trade'] = 'trade'
                 context.long_quota -= 1
@@ -423,7 +456,7 @@ def detect_entry_signals(context,data):
             else if (context.short_quota > 0 and
                      current_price <= context.MT[sym]['strat 1 short breakout price']):
 
-                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['scale-in stage'] = -1
                 context.MT[sym]['type of breakout'] = 'strat_one_short'
                 context.MT[sym]['keep track or trade'] = 'trade'
                 context.short_quota -= 1
@@ -434,7 +467,7 @@ def detect_entry_signals(context,data):
             if (context.long_quota > 0 and
                 current_price >= context.MT[sym]['strat 2 long breakout price']):
 
-                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['scale-in stage'] = 1
                 context.MT[sym]['type of breakout'] = 'strat_two_long'
                 context.MT[sym]['keep track or trade']= 'trade'
                 context.long_quota -= 1
@@ -443,7 +476,7 @@ def detect_entry_signals(context,data):
             else if (context.short_quota > 0 and
                      current_price <= context.MT[sym]['strat 2 short breakout price']:
                        
-                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['scale-in stage'] = -1
                 context.MT[sym]['type of breakout'] = 'strat_two_short'
                 context.MT[sym]['keep track or trade']= 'trade'
                 context.short_quota -= 1
@@ -453,12 +486,12 @@ def detect_entry_signals(context,data):
         else:
 
             if current_price >= context.MT[sym]['strat 1 long breakout price']:
-                context.MT[sym]['scale in stage'] = 1
+                context.MT[sym]['scale-in stage'] = 1
                 context.MT[sym]['type of breakout'] = 'strat_one_long'
                 context.MT[sym]['keep track or trade'] = 'keep_track'
 
             else if current_price <= context.MT[sym]['strat 1 short breakout price']:
-                context.MT[sym]['scale in stage'] = -1
+                context.MT[sym]['scale-in stage'] = -1
                 context.MT[sym]['type of breakout'] = 'strat_one_short'
                 context.MT[sym]['keep track or trade'] = 'keep_track'         
  
@@ -489,7 +522,46 @@ def detect_scaling_signals(context,data)
     """
     for sym in context.tradable_symbols:
         
-        if context.MT[sym]['scale in stage'] == 0 or ABS(context.MT[sym]['scale in stage']) == 4:
+        if context.MT[sym]['scale-in stage'] == 0 or ABS(context.MT[sym]['scale-in stage']) == 4:
             continue
         
-        
+        current_price = data.current(context.cfutures[market], 'price')
+        long_or_short = 0
+
+        previous_entry_time = retrieve_entry_time(sym, ABS(context.MT[sym]["scale-in stage"]))
+        previous_entry_price = retrieve_entry_price(context, data, sym, previous_entry_time)
+
+        if context.MT[sym]['scale-in stage'] > 0:
+            if current_price - previous_entry_price > 0.5*context.MT[sym]['ATR']:
+
+                long_or_short = 1
+                context.MT[sym]['scale-in stage'] += 1
+
+
+        else if context.MT[sym]['scale-in stage'] < 0:
+            if previous_entry_price - current price > 0.5*context.MT[sym]['ATR']:
+
+                long_or_short = -1
+                context.MT[sym]['scale-in stage'] -= 1
+
+        if long_or_short != 0:
+            entry_time = get_datetime()
+            store_entry_time(sym, ABS(context.MT[sym]['scale-in stage']), entry_time)
+
+            order_identifier = order(
+                context.MT[sym]['current contract'],
+                long_or_short * context.MT[sym]['unit size'],
+                style = LimitOrder(current_price)
+            )
+            update_trade_orders(context,data,sym,order_identifier)
+
+            log.info(
+                '%s(scaling %i) %s %i@%.2f'
+                %(
+                    context.MT[sym]['type of breakout'],
+                    context.MT[sym]['scale-in stage']
+                    sym,
+                    context.MT[sym]['unit size'],
+                    current_price  
+                )
+            )
